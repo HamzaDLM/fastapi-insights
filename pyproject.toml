@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastapi-insights"
-version = "0.1.1"
+version = "0.1.2"
 description = "fastapi-insights is a FastAPI extension that tracks request and system metrics and provides a built-in dashboard."
 readme = "README.md"
 authors = [{ name = "Hamza Dellam" }]
