@@ -7,7 +7,7 @@ handler = logging.StreamHandler()
 #     DefaultFormatter(fmt="%(levelprefix)s %(message)s", use_colors=True)
 # )
 
-logger = logging.getLogger("fastapi-metrics")
+logger = logging.getLogger("fastapi-insights")
 # logger.addHandler(handler)
 # logger.setLevel(logging.DEBUG)
 # logger.propagate = False

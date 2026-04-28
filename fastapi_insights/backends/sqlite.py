@@ -13,7 +13,7 @@ import sqlite3
 import time
 from collections import defaultdict
 
-from fastapi_metrics.backends.base import MetricsStore
+from fastapi_insights.backends.base import MetricsStore
 
 
 class SQLiteMetricsStore(MetricsStore):

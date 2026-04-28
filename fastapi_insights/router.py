@@ -1,25 +1,26 @@
 import time
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
-from fastapi_metrics.config import Config
-from fastapi_metrics.backends.base import MetricsStore, AsyncMetricsStore
-from fastapi_metrics.logger import logger
-from fastapi_metrics.utils import timestamp_to_readable
+from fastapi_insights.backends.base import MetricsStore, AsyncMetricsStore
+from fastapi_insights.config import Config
 
 
 def get_metrics_router(store: MetricsStore, config: Config) -> APIRouter:
     metrics_router = APIRouter()
-
-    @metrics_router.get(
-        "/config-b887e852-bd12-41f2-b057-1bd31eb5443e", include_in_schema=False
-    )
-    async def get_config():
-        return {}
-
-    # config.custom_path requires check
     prefixed_router = APIRouter(prefix=config.custom_path)
+
+    def dashboard_config() -> dict[str, str]:
+        return {"title": config.ui_title}
+
+    @metrics_router.get(config.ui_config_route, include_in_schema=False)
+    async def get_config():
+        return dashboard_config()
+
+    @prefixed_router.get("/_dashboard_config", include_in_schema=False)
+    async def get_dashboard_config():
+        return dashboard_config()
 
     @prefixed_router.get(
         "/json",
@@ -29,10 +30,6 @@ def get_metrics_router(store: MetricsStore, config: Config) -> APIRouter:
     async def get_metrics(
         ts_from: int, ts_to: int | None = None, bucket_size: int | None = None
     ):
-        logger.debug(
-            f"ROUTER: get metrics {timestamp_to_readable(ts_from)} to {timestamp_to_readable(ts_to)}"
-        )
-
         if ts_to is None:
             ts_to = int(time.time())
 
@@ -48,10 +45,6 @@ def get_metrics_router(store: MetricsStore, config: Config) -> APIRouter:
         ts_from: int,
         ts_to: int | None = None,
     ):
-        logger.debug(
-            f"ROUTER: get overview table, from:{timestamp_to_readable(ts_from)} to:{timestamp_to_readable(ts_to)}"
-        )
-
         if ts_to is None:
             ts_to = int(time.time())
 
@@ -64,9 +57,8 @@ def get_metrics_router(store: MetricsStore, config: Config) -> APIRouter:
         include_in_schema=config.include_in_openapi,
     )
     async def reset_store():
-        logger.debug("ROUTER: reset store")
         store.reset()
-        return JSONResponse(content="metrics store reset!")
+        return Response(status_code=204)
 
     metrics_router.include_router(prefixed_router)
 
@@ -75,15 +67,18 @@ def get_metrics_router(store: MetricsStore, config: Config) -> APIRouter:
 
 def get_async_metrics_router(store: AsyncMetricsStore, config: Config) -> APIRouter:
     metrics_router = APIRouter()
-
-    @metrics_router.get(
-        "/config-b887e852-bd12-41f2-b057-1bd31eb5443e", include_in_schema=False
-    )
-    async def get_config():
-        return {}
-
-    # config.custom_path requires check
     prefixed_router = APIRouter(prefix=config.custom_path)
+
+    def dashboard_config() -> dict[str, str]:
+        return {"title": config.ui_title}
+
+    @metrics_router.get(config.ui_config_route, include_in_schema=False)
+    async def get_config():
+        return dashboard_config()
+
+    @prefixed_router.get("/_dashboard_config", include_in_schema=False)
+    async def get_dashboard_config():
+        return dashboard_config()
 
     @prefixed_router.get(
         "/json",
@@ -93,10 +88,6 @@ def get_async_metrics_router(store: AsyncMetricsStore, config: Config) -> APIRou
     async def get_metrics(
         ts_from: int, ts_to: int | None = None, bucket_size: int | None = None
     ):
-        logger.debug(
-            f"ROUTER: get metrics {timestamp_to_readable(ts_from)} to {timestamp_to_readable(ts_to)}"
-        )
-
         if ts_to is None:
             ts_to = int(time.time())
 
@@ -114,10 +105,6 @@ def get_async_metrics_router(store: AsyncMetricsStore, config: Config) -> APIRou
         ts_from: int,
         ts_to: int | None = None,
     ):
-        logger.debug(
-            f"ROUTER: get overview table, from:{timestamp_to_readable(ts_from)} to:{timestamp_to_readable(ts_to)}"
-        )
-
         if ts_to is None:
             ts_to = int(time.time())
 
@@ -130,9 +117,8 @@ def get_async_metrics_router(store: AsyncMetricsStore, config: Config) -> APIRou
         include_in_schema=config.include_in_openapi,
     )
     async def reset_store():
-        logger.debug("ROUTER: reset store")
         await store.reset()
-        return JSONResponse(content="metrics store reset!")
+        return Response(status_code=204)
 
     metrics_router.include_router(prefixed_router)
 

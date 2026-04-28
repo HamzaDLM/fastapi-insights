@@ -1,27 +1,40 @@
-name: Publish Python Package
+name: Publish
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Where to publish the package"
+        required: true
+        type: choice
+        options:
+          - testpypi
+          - pypi
+      ref:
+        description: "Git ref to publish (tag or commit SHA)"
+        required: true
+        type: string
 
 jobs:
-  publish:
+  build:
+    name: Build And Verify
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.13
+          python-version: "3.13"
 
       - name: Install uv
         run: pip install uv
 
-      - name: Install dev deps
+      - name: Install dev dependencies
         run: uv sync --dev
 
       - name: Lint
@@ -30,8 +43,8 @@ jobs:
       - name: Format check
         run: uv run ruff format --check .
 
-      - name: Type Check
-        run: uv run mypy fastapi_metrics
+      - name: Type check
+        run: uv run mypy fastapi_insights
 
       - name: Run tests
         run: uv run pytest -q --disable-warnings
@@ -39,7 +52,92 @@ jobs:
       - name: Build package
         run: uv build
 
-      - name: Publish to PyPI
-        env:
-          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
-        run: uv publish --token $PYPI_TOKEN
+      - name: Verify built wheel contents
+        run: |
+          python -m zipfile -l dist/*.whl
+          python - <<'PY'
+          import glob
+          import zipfile
+
+          wheel_path = glob.glob("dist/*.whl")[0]
+          with zipfile.ZipFile(wheel_path) as wheel_archive:
+              file_names = set(wheel_archive.namelist())
+
+          required_files = {
+              "fastapi_insights/static/frontend/index.html",
+              "fastapi_insights/static/frontend/main.js",
+              "fastapi_insights/static/frontend/favicon.ico",
+              "fastapi_insights/static/bg.png",
+              "fastapi_insights/py.typed",
+          }
+          missing_files = sorted(required_files - file_names)
+          if missing_files:
+              raise SystemExit(f"Missing files in wheel: {missing_files}")
+          PY
+
+      - name: Smoke test installed wheel
+        run: |
+          python -m venv /tmp/fastapi-insights-release-venv
+          /tmp/fastapi-insights-release-venv/bin/pip install dist/*.whl
+          /tmp/fastapi-insights-release-venv/bin/python - <<'PY'
+          import pathlib
+
+          import fastapi_insights
+          import fastapi_insights.backends
+
+          package_root = pathlib.Path(fastapi_insights.__file__).resolve().parent
+          assert (package_root / "static" / "frontend" / "index.html").exists()
+          assert (package_root / "static" / "frontend" / "main.js").exists()
+          assert hasattr(fastapi_insights, "FastAPIInsights")
+          assert hasattr(fastapi_insights.backends, "InMemoryMetricsStore")
+          PY
+
+      - name: Upload built distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+
+  publish-testpypi:
+    name: Publish To TestPyPI
+    needs: build
+    if: inputs.target == 'testpypi'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/fastapi-insights
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download built distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+
+      - name: Publish package distributions to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    name: Publish To PyPI
+    needs: build
+    if: inputs.target == 'pypi'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/fastapi-insights
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download built distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

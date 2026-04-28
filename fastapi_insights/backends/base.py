@@ -7,8 +7,7 @@ from typing import Any, DefaultDict, Literal, TypedDict
 
 import psutil
 
-from fastapi_metrics.logger import logger
-from fastapi_metrics.utils import StatAggregator
+from fastapi_insights.utils import StatAggregator
 
 proc = psutil.Process(os.getpid())
 
@@ -19,15 +18,6 @@ class SystemLogEntry(TypedDict):
     max: float
     avg: float
 
-
-SystemMetricKey = Literal[
-    "cpu_percent",
-    "memory_percent",
-    "memory_used_mb",
-    "memory_available_mb",
-    "network_io_sent",
-    "network_io_recv",
-]
 
 StatusCodes = Literal["1XX", "2XX", "3XX", "4XX", "5XX"]
 HttpMethods = Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTION"]
@@ -111,7 +101,6 @@ class _BaseStore(ABC):
         return max(self.bucket_sizes)
 
     async def record_system_metrics(self) -> None:
-        logger.debug("STORE: recording system metrics")
         memory_info = proc.memory_info()
         memory_used_mb = memory_info.rss / 1024 / 1024
         memory_percent = (memory_info.rss / psutil.virtual_memory().total) * 100
@@ -226,7 +215,7 @@ class MetricsStore(_BaseStore):
         ]
 
     def _get_top_routes(
-        self, bucket_size: int, ts_from: int, ts_to: int, limit=5
+        self, bucket_size: int, ts_from: int, ts_to: int, limit: int = 5
     ) -> dict:
         route_totals = defaultdict(int)
 
@@ -339,9 +328,6 @@ class MetricsStore(_BaseStore):
             data["throughput_rps"] = round(
                 sum(data["throughput_rps"]) / len(data["throughput_rps"]), 2
             )
-
-        # # Sort by last_called desc
-        # rows.sort(key=itemgetter("last_called"), reverse=True)
 
         return {
             "rows": rows,
@@ -578,9 +564,6 @@ class AsyncMetricsStore(_BaseStore):
             data["throughput_rps"] = round(
                 sum(data["throughput_rps"]) / len(data["throughput_rps"]), 2
             )
-
-        # # Sort by last_called desc
-        # rows.sort(key=itemgetter("last_called"), reverse=True)
 
         return {
             "rows": rows,

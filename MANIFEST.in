@@ -1,0 +1,4 @@
+include LICENSE
+include README.md
+recursive-include fastapi_insights/static *
+include fastapi_insights/py.typed

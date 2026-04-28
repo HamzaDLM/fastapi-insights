@@ -8,10 +8,10 @@ try:
 except ImportError as e:
     raise ImportError(
         "Redis backend requires 'redis'. Install with: "
-        "pip install fastapi-metrics[redis]"
+        "pip install fastapi-insights[redis]"
     ) from e
 
-from fastapi_metrics.backends.base import AsyncMetricsStore, MetricsStore, Bucket
+from fastapi_insights.backends.base import AsyncMetricsStore, MetricsStore, Bucket
 
 
 class RedisMetricsStore(MetricsStore):
@@ -273,7 +273,7 @@ class AsyncRedisMetricsStore(AsyncMetricsStore):
         )  # type: ignore
 
         if self.ttl_seconds:
-            self.client.expire(base_key, self.ttl_seconds)
+            await self.client.expire(base_key, self.ttl_seconds)
 
     async def record_request_metrics(
         self, path: str, duration: float, status_code: int, method: str

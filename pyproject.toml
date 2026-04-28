@@ -1,23 +1,58 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "fastapi-metrics"
+name = "fastapi-insights"
 version = "0.1.0"
-description = "fastapi-metrics is a fastapi extension that tracks different metrics and provides a clean dashboard to visualize them."
+description = "fastapi-insights is a FastAPI extension that tracks request and system metrics and provides a built-in dashboard."
 readme = "README.md"
 authors = [{ name = "Hamza Dellam" }]
 license = "Apache-2.0"
-requires-python = ">=3.13"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.116.1",
     "psutil>=7.0.0",
-    "types-psutil>=7.0.0.20250822",
 ]
+keywords = ["fastapi", "metrics", "monitoring", "dashboard", "observability"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: FastAPI",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: WSGI :: Middleware",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Monitoring",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/HamzaDLM/fastapi-insights"
+Repository = "https://github.com/HamzaDLM/fastapi-insights"
+Issues = "https://github.com/HamzaDLM/fastapi-insights/issues"
 
 [project.optional-dependencies]
 redis = ["redis>=6.4.0"]
-aiosqlite = ["aiosqlite>=0.21.0"]
 
 [tool.setuptools.package-data]
-"fastapi_metrics" = ["py.typed"]
+"fastapi_insights" = [
+    "py.typed",
+    "static/bg.png",
+    "static/frontend/favicon.ico",
+    "static/frontend/index.html",
+    "static/frontend/main.js",
+]
+
+[tool.setuptools.packages.find]
+include = ["fastapi_insights*"]
+exclude = ["playground*", "tests*", "examples*"]
 
 [dependency-groups]
 dev = [
@@ -25,5 +60,6 @@ dev = [
     "mypy>=1.18.1",
     "pytest>=8.4.2",
     "ruff>=0.13.0",
+    "types-psutil>=7.0.0.20250822",
     "uvicorn>=0.35.0",
 ]

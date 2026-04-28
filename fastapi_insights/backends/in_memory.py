@@ -4,12 +4,12 @@ from typing import DefaultDict
 
 import psutil
 
-from fastapi_metrics.backends.base import (
+from fastapi_insights.backends.base import (
     MetricsStore,
     Bucket,
     SystemLogEntry,
 )
-from fastapi_metrics.logger import logger
+from fastapi_insights.logger import logger
 
 
 class InMemoryMetricsStore(MetricsStore):
@@ -219,7 +219,7 @@ class InMemoryMetricsStore(MetricsStore):
         for bucket_size in list(self._system_buckets.keys()):
             for bucket_start in list(self._system_buckets[bucket_size].keys()):
                 if now - bucket_start > self._ttl_seconds:
-                    del self._request_buckets[bucket_size][bucket_start]
+                    del self._system_buckets[bucket_size][bucket_start]
 
     def reset(self) -> None:
         """
