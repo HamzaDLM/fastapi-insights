@@ -35,6 +35,21 @@ Optional dependencies:
 
 Supported Python versions: `3.10+`
 
+## Development
+
+Install dev dependencies and set up pre-commit hooks:
+
+```shell
+> uv sync --dev
+> uv run pre-commit install
+```
+
+Run the checks manually at any time with:
+
+```shell
+> uv run pre-commit run --all-files
+```
+
 ## Quick Start
 
 Check the `examples` folder for more.

@@ -82,7 +82,7 @@ class SQLiteMetricsStore(MetricsStore):
             cur = self.conn.cursor()
             cur.execute(
                 """
-                SELECT data FROM request_metrics 
+                SELECT data FROM request_metrics
                 WHERE bucket_size=? AND bucket_ts=? AND path=?
             """,
                 (bucket_size, bucket_ts, path),
@@ -150,8 +150,8 @@ class SQLiteMetricsStore(MetricsStore):
         cur = self.conn.cursor()
         cur.execute(
             """
-            SELECT bucket_ts, path, data 
-            FROM request_metrics 
+            SELECT bucket_ts, path, data
+            FROM request_metrics
             WHERE bucket_size=? AND bucket_ts BETWEEN ? AND ?
         """,
             (bucket_size, ts_from, ts_to),
