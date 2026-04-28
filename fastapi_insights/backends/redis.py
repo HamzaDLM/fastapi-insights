@@ -1,6 +1,7 @@
 import json
 import time
 from collections import defaultdict
+from typing import Any, DefaultDict, cast
 
 try:
     from redis import Redis as SyncRedis
@@ -11,7 +12,69 @@ except ImportError as e:
         "pip install fastapi-insights[redis]"
     ) from e
 
-from fastapi_insights.backends.base import AsyncMetricsStore, MetricsStore, Bucket
+from fastapi_insights.backends.base import (
+    AsyncMetricsStore,
+    Bucket,
+    MetricsStore,
+    RequestBuckets,
+    SystemLogEntry,
+    SystemMetricsSeries,
+    get_rw_key,
+)
+
+
+def _new_bucket() -> Bucket:
+    return Bucket(
+        latencies=[],
+        count=0,
+        errors=0,
+        status_codes=defaultdict(int),
+        methods=defaultdict(int),
+        rw_count=defaultdict(int),
+    )
+
+
+def _deserialize_bucket(payload: bytes) -> Bucket:
+    raw = cast(dict[str, Any], json.loads(payload.decode("utf-8")))
+    raw_rw_count = cast(dict[str, int], raw.get("rw_count", {}))
+    return Bucket(
+        latencies=[float(value) for value in cast(list[Any], raw.get("latencies", []))],
+        count=int(raw.get("count", 0)),
+        errors=int(raw.get("errors", 0)),
+        status_codes=defaultdict(
+            int,
+            {
+                key: int(value)
+                for key, value in cast(
+                    dict[str, Any], raw.get("status_codes", {})
+                ).items()
+            },
+        ),
+        methods=defaultdict(
+            int,
+            {
+                key: int(value)
+                for key, value in cast(dict[str, Any], raw.get("methods", {})).items()
+            },
+        ),
+        rw_count=defaultdict(
+            int,
+            {
+                "read": int(raw_rw_count.get("read", 0)),
+                "write": int(raw_rw_count.get("write", 0)),
+            },
+        ),
+    )
+
+
+def _deserialize_system_entry(payload: bytes) -> SystemLogEntry:
+    raw = cast(dict[str, Any], json.loads(payload.decode("utf-8")))
+    return SystemLogEntry(
+        timestamp=int(raw["timestamp"]),
+        min=float(raw["min"]),
+        max=float(raw["max"]),
+        avg=float(raw["avg"]),
+    )
 
 
 class RedisMetricsStore(MetricsStore):
@@ -28,7 +91,7 @@ class RedisMetricsStore(MetricsStore):
 
     def __init__(self, client: SyncRedis, ttl_seconds: int | None = None):
         super().__init__()
-        if client is not None and not isinstance(client, SyncRedis):
+        if not isinstance(client, SyncRedis):
             raise TypeError(
                 f"Expected redis.client.Redis client, got {type(client).__name__}"
             )
@@ -44,7 +107,7 @@ class RedisMetricsStore(MetricsStore):
         return [5, 30, 300, 900]  # 5s, 30s, 5min, 15min
 
     async def _flush_system_metric_to_bucket(
-        self, key: str, bucket_size: int, data: dict
+        self, key: str, bucket_size: int, data: SystemLogEntry
     ) -> None:
         """
         Flush system metric data into a specific bucket.
@@ -91,19 +154,13 @@ class RedisMetricsStore(MetricsStore):
             bucket_timestamp = (now // bucket_size) * bucket_size
             base_key = f"request-metrics:{bucket_size}:{bucket_timestamp}"
 
-            route_stats = Bucket(
-                latencies=[],
-                count=0,
-                errors=0,
-                status_codes=defaultdict(int),
-                methods=defaultdict(int),
-                rw_count=defaultdict(int),
-            )
+            route_stats = _new_bucket()
 
             if self.client.exists(base_key):
                 if self.client.hexists(base_key, path):
                     existing_metrics = self.client.hget(base_key, path)
-                    route_stats = json.loads(existing_metrics.decode("utf-8"))  # type: ignore[union-attr]
+                    if existing_metrics is not None:
+                        route_stats = _deserialize_bucket(existing_metrics)
 
             route_stats["latencies"].append(duration)
             route_stats["count"] += 1
@@ -119,12 +176,7 @@ class RedisMetricsStore(MetricsStore):
 
             route_stats["methods"][method.upper()] += 1
 
-            if "read" not in route_stats["rw_count"]:
-                route_stats["rw_count"]["read"] = 0
-            if "write" not in route_stats["rw_count"]:
-                route_stats["rw_count"]["write"] = 0
-
-            rw_key = "read" if method.upper() in ("GET", "HEAD", "OPTIONS") else "write"
+            rw_key = get_rw_key(method)
             route_stats["rw_count"][rw_key] += 1
 
             self.client.hset(base_key, f"{path}", json.dumps(route_stats))
@@ -134,7 +186,7 @@ class RedisMetricsStore(MetricsStore):
 
     def get_request_metrics_series(
         self, bucket_size: int, ts_from: int, ts_to: int
-    ) -> dict[int, dict[str, dict]]:
+    ) -> RequestBuckets:
         """
         Retrieve request buckets within a specific time range.
 
@@ -146,7 +198,7 @@ class RedisMetricsStore(MetricsStore):
         Returns:
             Dictionary mapping bucket_start -> {route_path -> Bucket}.
         """
-        result = {}
+        result: RequestBuckets = {}
 
         start_bucket = (ts_from // bucket_size) * bucket_size
         end_bucket = (ts_to // bucket_size) * bucket_size
@@ -162,8 +214,8 @@ class RedisMetricsStore(MetricsStore):
                 if not (bucket_end <= ts_from or current_bucket > ts_to):
                     bucket_data = self.client.hgetall(base_key)
                     result[current_bucket] = {
-                        route.decode(): json.loads(bucket.decode("utf-8"))
-                        for route, bucket in bucket_data.items()  # type: ignore[union-attr]
+                        route.decode(): _deserialize_bucket(bucket)
+                        for route, bucket in bucket_data.items()
                     }
 
             current_bucket += bucket_size
@@ -172,7 +224,7 @@ class RedisMetricsStore(MetricsStore):
 
     def get_system_metrics_series(
         self, bucket_size: int, ts_from: int, ts_to: int
-    ) -> dict:
+    ) -> SystemMetricsSeries:
         """
         Retrieve system metrics series for a given time range.
 
@@ -184,7 +236,7 @@ class RedisMetricsStore(MetricsStore):
         Returns:
             A dictionary mapping SystemMetricKey -> list[SystemLogEntry].
         """
-        data_points = defaultdict(list)
+        data_points: DefaultDict[str, list[SystemLogEntry]] = defaultdict(list)
         start_bucket = (ts_from // bucket_size) * bucket_size
         end_bucket = (ts_to // bucket_size) * bucket_size
 
@@ -195,8 +247,8 @@ class RedisMetricsStore(MetricsStore):
             if not bucket_data:
                 continue
 
-            for key, val in bucket_data.items():  # type: ignore[union-attr]
-                data_points[key.decode()].append(json.loads(val.decode()))
+            for key, val in bucket_data.items():
+                data_points[key.decode()].append(_deserialize_system_entry(val))
 
         return data_points
 
@@ -237,7 +289,7 @@ class AsyncRedisMetricsStore(AsyncMetricsStore):
 
     def __init__(self, client: AsyncRedis, ttl_seconds: int | None = None):
         super().__init__()
-        if client is not None and not isinstance(client, AsyncRedis):
+        if not isinstance(client, AsyncRedis):
             raise TypeError(
                 f"Expected redis.asyncio.client.Redis client, got {type(client).__name__}"
             )
@@ -254,7 +306,7 @@ class AsyncRedisMetricsStore(AsyncMetricsStore):
         return [5, 30, 300, 900]  # 5s, 30s, 5min, 15min
 
     async def _flush_system_metric_to_bucket(
-        self, key: str, bucket_size: int, data: dict
+        self, key: str, bucket_size: int, data: SystemLogEntry
     ) -> None:
         """
         Flush system metric data into a specific bucket.
@@ -270,7 +322,7 @@ class AsyncRedisMetricsStore(AsyncMetricsStore):
             base_key,
             key,
             json.dumps(data),
-        )  # type: ignore
+        )
 
         if self.ttl_seconds:
             await self.client.expire(base_key, self.ttl_seconds)
@@ -293,19 +345,13 @@ class AsyncRedisMetricsStore(AsyncMetricsStore):
             bucket_timestamp = (now // bucket_size) * bucket_size
             base_key = f"request-metrics:{bucket_size}:{bucket_timestamp}"
 
-            route_stats = Bucket(
-                latencies=[],
-                count=0,
-                errors=0,
-                status_codes=defaultdict(int),
-                methods=defaultdict(int),
-                rw_count=defaultdict(int),
-            )
+            route_stats = _new_bucket()
 
             if await self.client.exists(base_key):
-                if await self.client.hexists(base_key, path):  # type: ignore
-                    existing_metrics = await self.client.hget(base_key, path)  # type: ignore
-                    route_stats = json.loads(existing_metrics.decode("utf-8"))  # type: ignore[union-attr]
+                if await self.client.hexists(base_key, path):
+                    existing_metrics = await self.client.hget(base_key, path)
+                    if existing_metrics is not None:
+                        route_stats = _deserialize_bucket(existing_metrics)
 
             route_stats["latencies"].append(duration)
             route_stats["count"] += 1
@@ -321,22 +367,17 @@ class AsyncRedisMetricsStore(AsyncMetricsStore):
 
             route_stats["methods"][method.upper()] += 1
 
-            if "read" not in route_stats["rw_count"]:
-                route_stats["rw_count"]["read"] = 0
-            if "write" not in route_stats["rw_count"]:
-                route_stats["rw_count"]["write"] = 0
-
-            rw_key = "read" if method.upper() in ("GET", "HEAD", "OPTIONS") else "write"
+            rw_key = get_rw_key(method)
             route_stats["rw_count"][rw_key] += 1
 
-            await self.client.hset(base_key, f"{path}", json.dumps(route_stats))  # type: ignore
+            await self.client.hset(base_key, f"{path}", json.dumps(route_stats))
 
             if self.ttl_seconds:
                 await self.client.expire(base_key, self.ttl_seconds)
 
     async def get_request_metrics_series(
         self, bucket_size: int, ts_from: int, ts_to: int
-    ) -> dict[int, dict[str, dict]]:
+    ) -> RequestBuckets:
         """
         Retrieve request buckets within a specific time range.
 
@@ -348,7 +389,7 @@ class AsyncRedisMetricsStore(AsyncMetricsStore):
         Returns:
             Dictionary mapping bucket_start -> {route_path -> Bucket}.
         """
-        result = {}
+        result: RequestBuckets = {}
 
         start_bucket = (ts_from // bucket_size) * bucket_size
         end_bucket = (ts_to // bucket_size) * bucket_size
@@ -362,10 +403,10 @@ class AsyncRedisMetricsStore(AsyncMetricsStore):
             if bucket_exists:
                 bucket_end = current_bucket + bucket_size
                 if not (bucket_end <= ts_from or current_bucket > ts_to):
-                    bucket_data = await self.client.hgetall(base_key)  # type: ignore
+                    bucket_data = await self.client.hgetall(base_key)
                     result[current_bucket] = {
-                        route.decode(): json.loads(bucket.decode("utf-8"))
-                        for route, bucket in bucket_data.items()  # type: ignore[union-attr]
+                        route.decode(): _deserialize_bucket(bucket)
+                        for route, bucket in bucket_data.items()
                     }
 
             current_bucket += bucket_size
@@ -374,7 +415,7 @@ class AsyncRedisMetricsStore(AsyncMetricsStore):
 
     async def get_system_metrics_series(
         self, bucket_size: int, ts_from: int, ts_to: int
-    ) -> dict:
+    ) -> SystemMetricsSeries:
         """
         Retrieve system metrics series for a given time range.
 
@@ -386,19 +427,19 @@ class AsyncRedisMetricsStore(AsyncMetricsStore):
         Returns:
             A dictionary mapping SystemMetricKey -> list[SystemLogEntry].
         """
-        data_points = defaultdict(list)
+        data_points: DefaultDict[str, list[SystemLogEntry]] = defaultdict(list)
         start_bucket = (ts_from // bucket_size) * bucket_size
         end_bucket = (ts_to // bucket_size) * bucket_size
 
         for bucket_ts in range(start_bucket, end_bucket + bucket_size, bucket_size):
             redis_key = f"system-metrics:{bucket_size}:{bucket_ts}"
 
-            bucket_data = await self.client.hgetall(redis_key)  # type: ignore
+            bucket_data = await self.client.hgetall(redis_key)
             if not bucket_data:
                 continue
 
-            for key, val in bucket_data.items():  # type: ignore[union-attr]
-                data_points[key.decode()].append(json.loads(val.decode()))
+            for key, val in bucket_data.items():
+                data_points[key.decode()].append(_deserialize_system_entry(val))
 
         return data_points
 

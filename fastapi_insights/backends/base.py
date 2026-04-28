@@ -3,7 +3,7 @@ import os
 import statistics
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from typing import Any, DefaultDict, Literal, TypedDict
+from typing import Any, DefaultDict, Literal, TypedDict, cast
 
 import psutil
 
@@ -30,6 +30,14 @@ class Bucket(TypedDict):
     status_codes: DefaultDict[str, int]
     methods: DefaultDict[str, int]
     rw_count: DefaultDict[Literal["read", "write"], int]
+
+
+RequestBuckets = dict[int, dict[str, Bucket]]
+SystemMetricsSeries = dict[str, list[SystemLogEntry]]
+
+
+def get_rw_key(method: str) -> Literal["read", "write"]:
+    return "read" if method.upper() in ("GET", "HEAD", "OPTIONS") else "write"
 
 
 class _BaseStore(ABC):
@@ -66,7 +74,7 @@ class _BaseStore(ABC):
     def _create_flush_callback(self, metric_name: str, bucket_size: int):
         """Create a flush callback for a specific metric and bucket size."""
 
-        def callback(data: dict):
+        def callback(data: SystemLogEntry):
             return asyncio.create_task(
                 self._flush_system_metric_to_bucket(metric_name, bucket_size, data)
             )
@@ -75,7 +83,7 @@ class _BaseStore(ABC):
 
     @abstractmethod
     async def _flush_system_metric_to_bucket(
-        self, key: str, bucket_size: int, data: dict
+        self, key: str, bucket_size: int, data: SystemLogEntry
     ) -> None: ...
 
     def _get_bucket_size(
@@ -147,12 +155,12 @@ class MetricsStore(_BaseStore):
     @abstractmethod
     def get_request_metrics_series(
         self, bucket_size: int, ts_from: int, ts_to: int
-    ) -> dict[int, dict[str, dict]]: ...
+    ) -> RequestBuckets: ...
 
     @abstractmethod
     def get_system_metrics_series(
         self, bucket_size: int, ts_from: int, ts_to: int
-    ) -> dict: ...
+    ) -> SystemMetricsSeries: ...
 
     @abstractmethod
     def reset(self) -> None: ...
@@ -160,7 +168,7 @@ class MetricsStore(_BaseStore):
     def _get_status_code_series(
         self, bucket_size: int, ts_from: int, ts_to: int
     ) -> list:
-        grouped = {
+        grouped: dict[str, list[list[int | float]]] = {
             "1XX": [],
             "2XX": [],
             "3XX": [],
@@ -170,7 +178,7 @@ class MetricsStore(_BaseStore):
 
         buckets = self.get_request_metrics_series(bucket_size, ts_from, ts_to)
         for ts, routes in buckets.items():
-            codes = defaultdict(int)
+            codes: DefaultDict[str, int] = defaultdict(int)
             for route_data in routes.values():
                 for code, count in route_data["status_codes"].items():
                     codes[code] += count
@@ -216,7 +224,7 @@ class MetricsStore(_BaseStore):
     def _get_top_routes(
         self, bucket_size: int, ts_from: int, ts_to: int, limit: int = 5
     ) -> dict:
-        route_totals = defaultdict(int)
+        route_totals: DefaultDict[str, int] = defaultdict(int)
 
         buckets = self.get_request_metrics_series(bucket_size, ts_from, ts_to)
         for routes in buckets.values():
@@ -247,7 +255,7 @@ class MetricsStore(_BaseStore):
     def _get_top_error_prone_requests(
         self, bucket_size: int, ts_from: int, ts_to: int, count: int = 5
     ) -> dict:
-        path_error_count = defaultdict(int)
+        path_error_count: DefaultDict[str, int] = defaultdict(int)
 
         buckets = self.get_request_metrics_series(bucket_size, ts_from, ts_to)
         for bucket in buckets.values():
@@ -260,8 +268,10 @@ class MetricsStore(_BaseStore):
             ]
         )
 
-    def _get_requests_per_method(self, bucket_size: int, ts_from: int, ts_to: int):
-        methods_count = defaultdict(int)
+    def _get_requests_per_method(
+        self, bucket_size: int, ts_from: int, ts_to: int
+    ) -> DefaultDict[str, int]:
+        methods_count: DefaultDict[str, int] = defaultdict(int)
 
         buckets = self.get_request_metrics_series(bucket_size, ts_from, ts_to)
         for values in buckets.values():
@@ -277,7 +287,7 @@ class MetricsStore(_BaseStore):
         ts_to: int,
     ) -> dict:
         bucket_size = self._get_bucket_size(ts_to - ts_from)
-        rows: DefaultDict[str, Any] = defaultdict(
+        rows: DefaultDict[str, dict[str, Any]] = defaultdict(
             lambda: {
                 "last_called": 0,
                 "total_call_count": 0,
@@ -289,9 +299,9 @@ class MetricsStore(_BaseStore):
             }
         )
 
-        max_values = {
-            "p99_latency": 0,
-            "error_rate": 0,
+        max_values: dict[str, float] = {
+            "p99_latency": 0.0,
+            "error_rate": 0.0,
         }
 
         buckets = self.get_request_metrics_series(bucket_size, ts_from, ts_to)
@@ -311,22 +321,26 @@ class MetricsStore(_BaseStore):
                 ) / rows[route_path]["total_call_count"]
                 rows[route_path]["p99_latency"].extend(values["latencies"])
 
-        for _, data in rows.items():
-            p99 = statistics.quantiles(data["p99_latency"], n=100)[int(0.99 * 100) - 1]
+        for data in rows.values():
+            row = cast(dict[str, Any], data)
+            latencies = cast(list[float], row["p99_latency"])
+            requests_per_minute = cast(list[float], row["requests_per_minute"])
+            throughput_rps = cast(list[float], row["throughput_rps"])
+            error_rate = cast(float, row["error_rate"])
+
+            p99 = statistics.quantiles(latencies, n=100)[int(0.99 * 100) - 1]
             if p99 > max_values["p99_latency"]:
                 max_values["p99_latency"] = p99
-            data["p99_latency"] = p99
+            row["p99_latency"] = p99
 
-            if data["error_rate"] > max_values["error_rate"]:
-                max_values["error_rate"] = data["error_rate"]
+            if error_rate > max_values["error_rate"]:
+                max_values["error_rate"] = error_rate
 
-            data["requests_per_minute"] = round(
-                sum(data["requests_per_minute"]) / len(data["requests_per_minute"]), 2
+            row["requests_per_minute"] = round(
+                sum(requests_per_minute) / len(requests_per_minute), 2
             )
 
-            data["throughput_rps"] = round(
-                sum(data["throughput_rps"]) / len(data["throughput_rps"]), 2
-            )
+            row["throughput_rps"] = round(sum(throughput_rps) / len(throughput_rps), 2)
 
         return {
             "rows": rows,
@@ -377,12 +391,12 @@ class AsyncMetricsStore(_BaseStore):
     @abstractmethod
     async def get_request_metrics_series(
         self, bucket_size: int, ts_from: int, ts_to: int
-    ) -> dict[int, dict[str, dict]]: ...
+    ) -> RequestBuckets: ...
 
     @abstractmethod
     async def get_system_metrics_series(
         self, bucket_size: int, ts_from: int, ts_to: int
-    ) -> dict: ...
+    ) -> SystemMetricsSeries: ...
 
     @abstractmethod
     async def _cleanup_expired_ttl(self) -> None: ...
@@ -393,7 +407,7 @@ class AsyncMetricsStore(_BaseStore):
     async def _get_status_code_series(
         self, bucket_size: int, ts_from: int, ts_to: int
     ) -> list:
-        grouped = {
+        grouped: dict[str, list[list[int | float]]] = {
             "1XX": [],
             "2XX": [],
             "3XX": [],
@@ -403,7 +417,7 @@ class AsyncMetricsStore(_BaseStore):
 
         buckets = await self.get_request_metrics_series(bucket_size, ts_from, ts_to)
         for ts, routes in buckets.items():
-            codes = defaultdict(int)
+            codes: DefaultDict[str, int] = defaultdict(int)
             for route_data in routes.values():
                 for code, count in route_data["status_codes"].items():
                     codes[code] += count
@@ -449,7 +463,7 @@ class AsyncMetricsStore(_BaseStore):
     async def _get_top_routes(
         self, bucket_size: int, ts_from: int, ts_to: int, limit=5
     ) -> dict:
-        route_totals = defaultdict(int)
+        route_totals: DefaultDict[str, int] = defaultdict(int)
 
         buckets = await self.get_request_metrics_series(bucket_size, ts_from, ts_to)
         for routes in buckets.values():
@@ -480,7 +494,7 @@ class AsyncMetricsStore(_BaseStore):
     async def _get_top_error_prone_requests(
         self, bucket_size: int, ts_from: int, ts_to: int, count: int = 5
     ) -> dict:
-        path_error_count = defaultdict(int)
+        path_error_count: DefaultDict[str, int] = defaultdict(int)
 
         buckets = await self.get_request_metrics_series(bucket_size, ts_from, ts_to)
         for bucket in buckets.values():
@@ -495,8 +509,8 @@ class AsyncMetricsStore(_BaseStore):
 
     async def _get_requests_per_method(
         self, bucket_size: int, ts_from: int, ts_to: int
-    ):
-        methods_count = defaultdict(int)
+    ) -> DefaultDict[str, int]:
+        methods_count: DefaultDict[str, int] = defaultdict(int)
 
         buckets = await self.get_request_metrics_series(bucket_size, ts_from, ts_to)
         for values in buckets.values():
@@ -512,7 +526,7 @@ class AsyncMetricsStore(_BaseStore):
         ts_to: int,
     ) -> dict:
         bucket_size = self._get_bucket_size(ts_to - ts_from)
-        rows: DefaultDict[str, Any] = defaultdict(
+        rows: DefaultDict[str, dict[str, Any]] = defaultdict(
             lambda: {
                 "last_called": 0,
                 "total_call_count": 0,
@@ -524,9 +538,9 @@ class AsyncMetricsStore(_BaseStore):
             }
         )
 
-        max_values = {
-            "p99_latency": 0,
-            "error_rate": 0,
+        max_values: dict[str, float] = {
+            "p99_latency": 0.0,
+            "error_rate": 0.0,
         }
 
         buckets = await self.get_request_metrics_series(bucket_size, ts_from, ts_to)
@@ -546,22 +560,26 @@ class AsyncMetricsStore(_BaseStore):
                 ) / rows[route_path]["total_call_count"]
                 rows[route_path]["p99_latency"].extend(values["latencies"])
 
-        for _, data in rows.items():
-            p99 = statistics.quantiles(data["p99_latency"], n=100)[int(0.99 * 100) - 1]
+        for data in rows.values():
+            row = cast(dict[str, Any], data)
+            latencies = cast(list[float], row["p99_latency"])
+            requests_per_minute = cast(list[float], row["requests_per_minute"])
+            throughput_rps = cast(list[float], row["throughput_rps"])
+            error_rate = cast(float, row["error_rate"])
+
+            p99 = statistics.quantiles(latencies, n=100)[int(0.99 * 100) - 1]
             if p99 > max_values["p99_latency"]:
                 max_values["p99_latency"] = p99
-            data["p99_latency"] = p99
+            row["p99_latency"] = p99
 
-            if data["error_rate"] > max_values["error_rate"]:
-                max_values["error_rate"] = data["error_rate"]
+            if error_rate > max_values["error_rate"]:
+                max_values["error_rate"] = error_rate
 
-            data["requests_per_minute"] = round(
-                sum(data["requests_per_minute"]) / len(data["requests_per_minute"]), 2
+            row["requests_per_minute"] = round(
+                sum(requests_per_minute) / len(requests_per_minute), 2
             )
 
-            data["throughput_rps"] = round(
-                sum(data["throughput_rps"]) / len(data["throughput_rps"]), 2
-            )
+            row["throughput_rps"] = round(sum(throughput_rps) / len(throughput_rps), 2)
 
         return {
             "rows": rows,

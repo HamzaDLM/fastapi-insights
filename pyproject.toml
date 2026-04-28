@@ -64,3 +64,7 @@ dev = [
     "types-psutil>=7.0.0.20250822",
     "uvicorn>=0.35.0",
 ]
+
+[[tool.mypy.overrides]]
+module = ["redis", "redis.asyncio"]
+ignore_missing_imports = true

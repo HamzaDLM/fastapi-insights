@@ -12,8 +12,15 @@ import sqlite3
 
 import time
 from collections import defaultdict
+from typing import Any, DefaultDict
 
-from fastapi_insights.backends.base import MetricsStore
+from fastapi_insights.backends.base import (
+    MetricsStore,
+    RequestBuckets,
+    SystemLogEntry,
+    SystemMetricsSeries,
+    get_rw_key,
+)
 
 
 class SQLiteMetricsStore(MetricsStore):
@@ -119,7 +126,7 @@ class SQLiteMetricsStore(MetricsStore):
             if "write" not in route_stats["rw_count"]:
                 route_stats["rw_count"]["write"] = 0
 
-            rw_key = "read" if method.upper() in ("GET", "HEAD", "OPTIONS") else "write"
+            rw_key = get_rw_key(method)
             route_stats["rw_count"][rw_key] = route_stats["rw_count"].get(rw_key, 0) + 1
 
             cur.execute(
@@ -134,7 +141,7 @@ class SQLiteMetricsStore(MetricsStore):
 
     def get_request_metrics_series(
         self, bucket_size: int, ts_from: int, ts_to: int
-    ) -> dict[int, dict[str, dict]]:
+    ) -> RequestBuckets:
         """
         Retrieve request buckets within a specific time range.
 
@@ -146,7 +153,7 @@ class SQLiteMetricsStore(MetricsStore):
         Returns:
             Dictionary mapping bucket_start -> {route_path -> Bucket}.
         """
-        result = defaultdict(dict)
+        result: DefaultDict[int, dict[str, Any]] = defaultdict(dict)
         cur = self.conn.cursor()
         cur.execute(
             """
@@ -161,7 +168,7 @@ class SQLiteMetricsStore(MetricsStore):
         return result
 
     async def _flush_system_metric_to_bucket(
-        self, key: str, bucket_size: int, data: dict
+        self, key: str, bucket_size: int, data: SystemLogEntry
     ) -> None:
         """
         Flush system metric data into a specific bucket.
@@ -185,7 +192,7 @@ class SQLiteMetricsStore(MetricsStore):
 
     def get_system_metrics_series(
         self, bucket_size: int, ts_from: int, ts_to: int
-    ) -> dict[str, list[dict]]:
+    ) -> SystemMetricsSeries:
         """
         Retrieve system metrics series for a given time range.
 
@@ -197,7 +204,7 @@ class SQLiteMetricsStore(MetricsStore):
         Returns:
             A dictionary mapping SystemMetricKey -> list[SystemLogEntry].
         """
-        data_points = defaultdict(list)
+        data_points: DefaultDict[str, list[SystemLogEntry]] = defaultdict(list)
         cur = self.conn.cursor()
         cur.execute(
             """
