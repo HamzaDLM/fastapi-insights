@@ -4,7 +4,6 @@ NOTES.md
 metrics.db
 sim.py
 playground
-tests/*
 .codex
 
 # Byte-compiled / optimized / DLL files
