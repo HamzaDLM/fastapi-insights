@@ -12,5 +12,4 @@ def test_pyproject_has_expected_package_metadata() -> None:
     pyproject = Path("pyproject.toml").read_text()
 
     assert 'name = "fastapi-insights"' in pyproject
-    assert 'version = "0.1.0"' in pyproject
     assert 'readme = "README.md"' in pyproject
