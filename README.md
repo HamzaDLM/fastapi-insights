@@ -151,16 +151,6 @@ uv sync
 uv run pytest
 ```
 
-## Releasing
-
-Releases are published with GitHub Actions using Trusted Publishing.
-
-- Publish to TestPyPI first
-- Verify the built wheel and install path
-- Then publish the exact same ref to PyPI
-
-The full release procedure is documented in [RELEASE.md](RELEASE.md).
-
 ## Limitations
 
 - Best suited for single-instance FastAPI deployments or small teams that want an embedded dashboard.

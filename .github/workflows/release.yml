@@ -92,6 +92,24 @@ jobs:
           assert hasattr(fastapi_insights.backends, "InMemoryMetricsStore")
           PY
 
+      - name: Smoke test installed sdist in no-binary mode
+        run: |
+          python -m venv /tmp/fastapi-insights-sdist-venv
+          /tmp/fastapi-insights-sdist-venv/bin/pip install --upgrade pip
+          /tmp/fastapi-insights-sdist-venv/bin/pip install --no-binary :all: dist/*.tar.gz
+          /tmp/fastapi-insights-sdist-venv/bin/python - <<'PY'
+          import pathlib
+
+          import fastapi_insights
+          import fastapi_insights.backends
+
+          package_root = pathlib.Path(fastapi_insights.__file__).resolve().parent
+          assert (package_root / "static" / "frontend" / "index.html").exists()
+          assert (package_root / "static" / "frontend" / "main.js").exists()
+          assert hasattr(fastapi_insights, "FastAPIInsights")
+          assert hasattr(fastapi_insights.backends, "InMemoryMetricsStore")
+          PY
+
       - name: Upload built distributions
         uses: actions/upload-artifact@v4
         with:

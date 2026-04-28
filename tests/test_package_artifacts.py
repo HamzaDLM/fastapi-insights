@@ -1,20 +1,16 @@
 from pathlib import Path
 
 
-def test_package_sources_manifest_lists_static_assets() -> None:
-    sources_manifest = Path("fastapi_insights.egg-info/SOURCES.txt")
-    assert sources_manifest.exists()
+def test_manifest_includes_required_package_assets() -> None:
+    manifest = Path("MANIFEST.in").read_text()
 
-    file_names = set(sources_manifest.read_text().splitlines())
-
-    assert "fastapi_insights/static/frontend/index.html" in file_names
-    assert "fastapi_insights/static/frontend/main.js" in file_names
-    assert "fastapi_insights/static/frontend/favicon.ico" in file_names
-    assert "fastapi_insights/static/bg.png" in file_names
-    assert "fastapi_insights/py.typed" in file_names
+    assert "recursive-include fastapi_insights/static *" in manifest
+    assert "include fastapi_insights/py.typed" in manifest
 
 
-def test_package_metadata_has_expected_name_and_version() -> None:
-    package_metadata = Path("fastapi_insights.egg-info/PKG-INFO").read_text()
-    assert "Name: fastapi-insights" in package_metadata
-    assert "Version: 0.1.0" in package_metadata
+def test_pyproject_has_expected_package_metadata() -> None:
+    pyproject = Path("pyproject.toml").read_text()
+
+    assert 'name = "fastapi-insights"' in pyproject
+    assert 'version = "0.1.0"' in pyproject
+    assert 'readme = "README.md"' in pyproject
