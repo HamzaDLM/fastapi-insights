@@ -414,7 +414,9 @@ class AsyncRedisMetricsStore(AsyncMetricsStore):
         for pattern in ["system-metrics:*", "request-metrics:*"]:
             cursor = 0
             while True:
-                cursor, keys = await self.client.scan(cursor=cursor, match=pattern, count=100)  # type: ignore
+                cursor, keys = await self.client.scan(
+                    cursor=cursor, match=pattern, count=100
+                )  # type: ignore
                 if keys:
                     await self.client.delete(*keys)
                 if cursor == 0:

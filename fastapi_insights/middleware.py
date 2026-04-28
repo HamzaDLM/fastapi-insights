@@ -10,7 +10,6 @@ from fastapi_insights.config import Config
 
 
 class MetricsMiddleware(BaseHTTPMiddleware):
-
     def __init__(self, app: ASGIApp, store: MetricsStore, config: Config):
         super().__init__(app)
         self.store = store
@@ -45,7 +44,6 @@ class MetricsMiddleware(BaseHTTPMiddleware):
 
 
 class AsyncMetricsMiddleware(BaseHTTPMiddleware):
-
     def __init__(self, app: ASGIApp, store: AsyncMetricsStore, config: Config):
         super().__init__(app)
         self.store = store

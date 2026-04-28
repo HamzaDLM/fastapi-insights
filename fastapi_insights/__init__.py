@@ -62,7 +62,9 @@ class FastAPIInsights:
         if isinstance(resolved_store, AsyncMetricsStore):
             cls._async_register_routes(app, resolved_store, resolved_config)
         else:
-            cls._register_routes(app, cast(MetricsStore, resolved_store), resolved_config)
+            cls._register_routes(
+                app, cast(MetricsStore, resolved_store), resolved_config
+            )
 
         cls._initialized_apps.add(app_id)
 
@@ -146,9 +148,7 @@ class FastAPIInsights:
     def _register_routes(
         cls, app: FastAPI, store: MetricsStore, config: Config
     ) -> None:
-        app.add_middleware(
-            MetricsMiddleware, store=store, config=config
-        )
+        app.add_middleware(MetricsMiddleware, store=store, config=config)
         app.include_router(
             get_metrics_router(store, config),
             tags=["fastapi dashboard metrics"],

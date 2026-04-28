@@ -139,7 +139,6 @@ class _BaseStore(ABC):
 
 
 class MetricsStore(_BaseStore):
-
     @abstractmethod
     def record_request_metrics(
         self, path: str, duration: float, status_code: int, method: str
@@ -370,7 +369,6 @@ class MetricsStore(_BaseStore):
 
 
 class AsyncMetricsStore(_BaseStore):
-
     @abstractmethod
     async def record_request_metrics(
         self, path: str, duration: float, status_code: int, method: str
